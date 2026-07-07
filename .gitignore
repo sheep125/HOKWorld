@@ -16,8 +16,21 @@ logs/
 *.onnx
 .cache/
 
+# PyInstaller 打包产物(不入库,本地用 rebuild_exe.bat 生成)
+dist/
+build/
+*.spec
+HOKWorld.spec
+HOKWorldDebug.spec
+
 # 编辑器 / 系统
 .idea/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# 临时文档(草稿/笔记,不入库)
+~$*.docx
+*.docx.autosave
+cd HOKWorld.docx
+

@@ -109,3 +109,88 @@ def client_rect_on_screen(hwnd: int) -> tuple[int, int, int, int]:
 
 def is_foreground(hwnd: int) -> bool:
     return bool(hwnd) and win32gui.GetForegroundWindow() == hwnd and not win32gui.IsIconic(hwnd)
+
+
+def activate_game_window(log=print) -> int | None:
+    """激活游戏窗口到前台(后台时 OCR/输入无法工作)。
+
+    返回 hwnd,失败返回 None。
+    原理: 先把本进程附着到前台线程的输入,再 SetForegroundWindow 避免被 Windows 前台锁定拦截。
+    """
+    hwnd = find_game_hwnd()
+    if not hwnd:
+        log("激活游戏窗口:未找到游戏窗口")
+        return None
+    if win32gui.IsIconic(hwnd):
+        win32gui.ShowWindow(hwnd, 9)  # SW_RESTORE
+    try:
+        fg = win32gui.GetForegroundWindow()
+        import ctypes
+        cur_tid = ctypes.windll.kernel32.GetCurrentThreadId()
+        fg_tid = ctypes.windll.user32.GetWindowThreadProcessId(fg, None)
+        if cur_tid != fg_tid:
+            ctypes.windll.user32.AttachThreadInput(cur_tid, fg_tid, True)
+            ctypes.windll.user32.SetForegroundWindow(hwnd)
+            ctypes.windll.user32.AttachThreadInput(cur_tid, fg_tid, False)
+        else:
+            win32gui.SetForegroundWindow(hwnd)
+    except Exception:
+        try:
+            win32gui.SetForegroundWindow(hwnd)
+        except Exception as exc:
+            log(f"激活游戏窗口失败: {exc}")
+    return hwnd
+
+
+# =====================================================================
+# 开机自启动
+# =====================================================================
+import winreg as _winreg
+
+_AUTOSTART_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+_AUTOSTART_VALUE_NAME = "HOKWorld"
+
+
+def _startup_target() -> str:
+    """获取要写入注册表的目标命令:打包后是 exe,源码模式下是 pythonw + dev_launcher。"""
+    if getattr(sys, "frozen", False):
+        # 打包:直接 exe 路径
+        return f'"{sys.executable}"'
+    # 源码:用 venv 的 pythonw + dev_launcher.py
+    script = os.path.abspath(os.path.join(os.path.dirname(__file__), "dev_launcher.py"))
+    return f'"{_pythonw()}" "{script}"'
+
+
+def is_autostart_enabled() -> bool:
+    """是否已配置开机自启。"""
+    try:
+        with _winreg.OpenKey(_winreg.HKEY_CURRENT_USER, _AUTOSTART_KEY, 0, _winreg.KEY_READ) as k:
+            _winreg.QueryValueEx(k, _AUTOSTART_VALUE_NAME)
+            return True
+    except FileNotFoundError:
+        return False
+    except Exception:
+        return False
+
+
+def enable_autostart() -> bool:
+    """开启开机自启。成功返回 True。"""
+    try:
+        target = _startup_target()
+        with _winreg.OpenKey(_winreg.HKEY_CURRENT_USER, _AUTOSTART_KEY, 0, _winreg.KEY_SET_VALUE) as k:
+            _winreg.SetValueEx(k, _AUTOSTART_VALUE_NAME, 0, _winreg.REG_SZ, target)
+        return True
+    except Exception:
+        return False
+
+
+def disable_autostart() -> bool:
+    """关闭开机自启。成功返回 True(本来就没配也算成功)。"""
+    try:
+        with _winreg.OpenKey(_winreg.HKEY_CURRENT_USER, _AUTOSTART_KEY, 0, _winreg.KEY_SET_VALUE) as k:
+            _winreg.DeleteValue(k, _AUTOSTART_VALUE_NAME)
+        return True
+    except FileNotFoundError:
+        return True  # 本来就没有
+    except Exception:
+        return False

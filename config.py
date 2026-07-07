@@ -14,6 +14,25 @@ from paths import config_path
 DEFAULTS = {
     "timing_jitter": False,          # 时序/位移随机抖动(默认关闭)
     "game_path": "",                 # 《王者荣耀世界》启动器 exe 路径;留空=自动定位(注册表/开始菜单);自动找不到时手填
+    # 全局行为
+    "auto_start_realtime": False,    # HOKWorld 启动后是否自动开始实时检测
+    "auto_exit_app": False,          # 游戏退出时是否自动退出 HOKWorld
+    "auto_water_after_game": False,  # 游戏启动后自动浇水(浇水完再开始实时检测)
+    "auto_water_mode": "self",       # 自动浇水模式: self=自己农场 / friends=好友农场
+    "auto_water_exit": False,        # (已废弃,仅向后兼容)联动浇水完成后退出游戏和HOKWorld
+    "auto_water_exit_mode": "none",  # 联动浇水完成后退出方式: none=不退出 / game_only=仅退出游戏 / all=退出游戏和HOKWorld
+    "minimize_after_game_start": False,  # 游戏启动后最小化HOKWorld窗口
+    # 实时触发
+    "auto_login": False,             # 游戏启动后自动登录(点击登录/进入游戏按钮)
+    # 月卡
+    "monthly_card_check": False,     # 是否检查并关闭月卡弹窗
+    "monthly_card_hour": 0,          # 月卡弹窗预期小时(默认 0=北京时间0点)
+    "monthly_card_window_mins": 30,  # 在该时间前后多少分钟内检查月卡
+    # 退出时杀游戏进程的路径
+    "game_exe_name": "NGR-Win64-Shipping.exe",  # 游戏进程名(用于 taskkill),因人而异可自行修改
+    # 定时调度
+    "schedule_enabled": False,        # 定时调度总开关
+    "schedule_entries": None,         # 条目 list;None 时由 scheduler 自动填默认 3 格
 }
 
 
