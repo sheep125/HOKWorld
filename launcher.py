@@ -85,11 +85,27 @@ def _reg_get(key, name):
 
 
 def _exe_from_config():
+    """从 game_path 配置读取启动器 exe 路径。
+    PyInstaller 打包后 os.path.isfile 对中文路径可能不稳定 → 加多重兼容检查。"""
     try:
         from config import cfg
         p = cfg.get("game_path")
-        if p and os.path.isfile(p):
+        if not p:
+            dev_log("game_path 配置为空")
+            return None
+        # 多重检查:os.path.isfile 在 PyInstaller 冻结环境对 CJK 路径可能误判,
+        # 同时用 os.path.exists 兜底,并用 os.stat 再确认(真的不存在时会抛异常)
+        if os.path.isfile(p):
             return p
+        # isfile 返回 False 但文件可能因编码问题未被正确识别 → 双重检查
+        if os.path.exists(p):
+            try:
+                if os.stat(p).st_size > 0:
+                    dev_log(f"isfile 误判,exists+stat 确认文件存在: {p}")
+                    return p
+            except OSError:
+                pass
+        dev_log(f"game_path 指向的文件不存在或不可读: {p}")
     except Exception as exc:
         dev_log("读取 game_path 配置失败", exc)
     return None

@@ -125,11 +125,14 @@ class RealtimeInterface(ScrollInterface):
         if self._aborting:
             self._maybe_reset_ui()
             return
+        # 游戏启动失败时不得进入浇水/检测(没游戏可操作,纯浪费 AUTO-MAS 配额)
         if not ok:
-            self._append("自动启动未完成,仍尝试开始实时检测(无游戏则自动收尾)")
+            self._append("自动启动游戏失败,任务中止(请检查启动器路径/config/管理员权限)")
+            self._show_status("启动失败,已停止")
+            self._maybe_reset_ui()
+            return
         # 游戏启动成功 → 按设置最小化窗口(让出前台给游戏)
-        if ok:
-            self._maybe_minimize_window()
+        self._maybe_minimize_window()
         # 开了联动浇水 → 先浇水,浇完再检测;否则直接检测
         if self.water_switch.isChecked():
             self._begin_watering()
