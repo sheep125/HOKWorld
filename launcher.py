@@ -34,11 +34,10 @@ import win32con
 import win32gui
 import win32ui
 
-from capture import GameCapture
+from capture import GameCapture, NORM_W
 from fishing.matcher import _get_ocr
 from runtime_guard import dev_log, release_known_keys, safe_click_norm, safe_press_key
 
-NORM_W = 1920                       # 识别基准宽(同 fishing/template_bank.NORM_W);大于此先降采样,限 OCR 开销
 GAME_TITLE_KEY = "王者荣耀世界"      # 启动器与游戏窗口标题都含它(可能带尾空格)
 GAME_EXE_NAME = "王者荣耀世界.exe"   # 启动器可执行文件名(KingLauncher\<版本>\ 下)
 

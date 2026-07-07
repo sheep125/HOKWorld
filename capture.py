@@ -26,7 +26,21 @@ import win32ui
 from winenv import client_rect_on_screen
 from runtime_guard import dev_log
 
-NORM_W = 1920   # 识别基准宽(同 fishing/template_bank.NORM_W);区域截图贴回此宽画布
+
+def _detect_norm_w() -> int:
+    """检测主显示器宽度,归一化目标取 min(实际宽, 1920)。
+    1920p 以下用户不做额外缩放(OCR 延迟最优); 2K/4K 用户自动缩到 1920。"""
+    try:
+        from win32api import GetSystemMetrics
+        w = GetSystemMetrics(0)  # SM_CXSCREEN = 主显示器宽
+        if w > 0:
+            return min(w, 1920)
+    except Exception:
+        pass
+    return 1920
+
+
+NORM_W: int = _detect_norm_w()   # 动态归一化基准宽(启动时检测一次)
 
 
 class GameCapture:

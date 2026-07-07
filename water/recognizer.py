@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import time
+from capture import NORM_W
 
 import cv2
 import numpy as np
@@ -21,7 +22,7 @@ class WaterRecognizer:
 
     # OCR 相关 —— 复用 fishing.matcher 的 OCR 单例
     MIN_CONF = 0.5
-    NORM_W = 1920
+    NORM_W = NORM_W  # 从 capture 导入的动态基准宽
 
     # 归一化 ROI —— 参考 MaaHKWorld 的 roi 参数
     # 好友列表区域(右侧,1200~1660,250~1020)
