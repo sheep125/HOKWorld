@@ -73,6 +73,28 @@ class Config:
     def timing_jitter(self) -> bool:
         return bool(self._d.get("timing_jitter"))
 
+    def water_exit_mode(self) -> str:
+        """解析联动浇水完成后的退出方式(统一入口,三处调用点共用)。
+
+        优先级规则(修复 AUTO-MAS 启动后脚本被关闭的 bug):
+          1. 新字段 auto_water_exit_mode 显式设为非 "none" → 直接用新字段
+             (用户明确选择了 game_only/all,不应被旧字段覆盖)
+          2. 新字段为 "none" 或缺失 → 才回退到旧字段 auto_water_exit:
+             - auto_water_exit=True  → "all"(旧行为,向后兼容)
+             - auto_water_exit=False → "none"
+
+        返回值: "none" / "game_only" / "all"
+        """
+        new_mode = str(self._d.get("auto_water_exit_mode") or "none").strip().lower()
+        if new_mode not in ("none", "game_only", "all"):
+            new_mode = "none"
+        if new_mode != "none":
+            return new_mode
+        # 新字段没明确意图 → 才考虑旧字段(向后兼容)
+        if bool(self._d.get("auto_water_exit")):
+            return "all"
+        return "none"
+
 
 # 进程内单例:UI 改设置后 save();各任务线程启动时读取一次。
 cfg = Config()

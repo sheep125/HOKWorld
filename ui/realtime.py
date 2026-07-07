@@ -157,12 +157,9 @@ class RealtimeInterface(ScrollInterface):
         from workers.water_worker import WaterWorker
         from config import cfg
         mode = "friends" if self.watering_page_mode() == "friends" else "self"
-        # 联动浇水完成后的退出方式(供 AUTO-MAS 调度)
-        # 向后兼容:旧的 auto_water_exit=True → "all"
-        if bool(cfg.get("auto_water_exit")):
-            exit_mode = "all"
-        else:
-            exit_mode = str(cfg.get("auto_water_exit_mode") or "none")
+        # 退出模式统一走 cfg.water_exit_mode()(修复 AUTO-MAS 启动后脚本被关闭的 bug)
+        # 旧的 auto_water_exit=True 不再强制覆盖新字段 auto_water_exit_mode
+        exit_mode = cfg.water_exit_mode()
         self._water_exit_mode = exit_mode
         tail = {"none": "→ 实时检测", "game_only": "→ 仅退出游戏", "all": "→ 退出(供调度)"}.get(exit_mode, "→ 实时检测")
         self._show_status(f"[联动] 游戏已启动,开始浇水({mode})…{tail}")

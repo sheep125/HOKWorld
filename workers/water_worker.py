@@ -9,15 +9,14 @@ class WaterWorker(BaseBotWorker):
     def __init__(self, mode: str = "friends", exit_after: bool = False) -> None:
         super().__init__()
         self._mode = mode
-        # exit_after 兼容老接口:True → "all",False → 读 config 的 auto_water_exit_mode
+        # 退出模式统一走 cfg.water_exit_mode(),避免老字段覆盖新字段的优先级冲突。
+        # exit_after=True 仅用于显式强制 "all"(老调用接口),否则读 config 统一解析。
         if exit_after:
             self._exit_mode = "all"
         else:
             try:
                 from config import cfg
-                # 向后兼容:旧的 auto_water_exit=True 优先(已开的用户不丢功能)
-                legacy = bool(cfg.get("auto_water_exit"))
-                self._exit_mode = "all" if legacy else str(cfg.get("auto_water_exit_mode") or "none")
+                self._exit_mode = cfg.water_exit_mode()
             except Exception:
                 self._exit_mode = "none"
 

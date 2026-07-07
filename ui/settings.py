@@ -74,12 +74,9 @@ class SettingsInterface(ScrollInterface):
         root.addWidget(self.auto_water_card)
 
         # 联动浇水完成后的退出方式(供 AUTO-MAS 等外部脚本调度)
-        # 兼容:旧 auto_water_exit=True 自动迁移到 "all"
+        # 统一走 cfg.water_exit_mode() 解析(避免老字段覆盖新字段的优先级冲突)
         from config import cfg
-        if bool(cfg.get("auto_water_exit")):
-            _cur_exit_mode = "all"
-        else:
-            _cur_exit_mode = str(cfg.get("auto_water_exit_mode") or "none")
+        _cur_exit_mode = cfg.water_exit_mode()
         self.water_exit_card = SettingCard(
             FIF.POWER_BUTTON, "联动浇水完成后",
             "浇水完成后的动作:不退出(继续实时检测) / 仅退出游戏(保留HOKWorld) / 退出游戏和HOKWorld(供调度)",
