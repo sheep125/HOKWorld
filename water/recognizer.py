@@ -6,13 +6,12 @@
 from __future__ import annotations
 
 import time
-from capture import NORM_W
 
 import cv2
 import numpy as np
 
-from capture import GameCapture
-from fishing.matcher import _get_ocr
+from capture import GameCapture, NORM_W
+from ocr_utils import find_text as _find_text_core, norm1920, ocr_lines as _ocr_lines_core, ocr_text as _ocr_text_core
 from runtime_guard import dev_log
 from winenv import client_rect_on_screen, find_game_hwnd
 
@@ -20,7 +19,7 @@ from winenv import client_rect_on_screen, find_game_hwnd
 class WaterRecognizer:
     """浇水视觉识别器。提供各种 UI 状态检测方法。"""
 
-    # OCR 相关 —— 复用 fishing.matcher 的 OCR 单例
+    # OCR 相关 —— 复用 ocr_utils 的公共实现
     MIN_CONF = 0.5
     NORM_W = NORM_W  # 从 capture 导入的动态基准宽
 
@@ -51,8 +50,8 @@ class WaterRecognizer:
         if not hwnd:
             return None
         try:
-            from launcher import _print_window_bgr
-            f = _print_window_bgr(hwnd)
+            from capture import print_window_bgr
+            f = print_window_bgr(hwnd)
             if f is not None:
                 return f
         except Exception:
@@ -65,69 +64,25 @@ class WaterRecognizer:
             return None
 
     def _norm1920(self, frame):
-        """宽 > NORM_W 时按比例降采样到 NORM_W,省 OCR 时间。"""
-        h, w = frame.shape[:2]
-        if w <= self.NORM_W:
-            return frame
-        nh = max(1, int(round(h * self.NORM_W / w)))
-        return cv2.resize(frame, (self.NORM_W, nh), interpolation=cv2.INTER_AREA)
+        """宽 > NORM_W 时按比例降采样到 NORM_W,省 OCR 时间。转发到 ocr_utils。"""
+        return norm1920(frame)
 
     def _crop(self, frame, roi):
-        """按归一化 roi=(x0,y0,x1,y1) 切子图。"""
-        h, w = frame.shape[:2]
-        x0, y0, x1, y1 = roi
-        return frame[int(y0 * h):int(y1 * h), int(x0 * w):int(x1 * w)]
+        """按归一化 roi=(x0,y0,x1,y1) 切子图。转发到 ocr_utils.crop。"""
+        from ocr_utils import crop
+        return crop(frame, roi)
 
     def _ocr_text(self, frame, roi) -> str:
-        """OCR 指定 ROI,返回拼接文本。"""
-        sub = self._crop(frame, roi)
-        if sub is None or sub.size == 0:
-            return ""
-        try:
-            res, _ = _get_ocr()(sub)
-        except Exception as exc:
-            dev_log("Water OCR 失败", exc)
-            return ""
-        parts = []
-        for it in (res or []):
-            try:
-                if float(it[2]) >= self.MIN_CONF:
-                    parts.append(str(it[1]))
-            except (TypeError, ValueError, IndexError):
-                pass
-        return "".join(parts)
+        """OCR 指定 ROI,返回拼接文本。转发到 ocr_utils.ocr_text。"""
+        return _ocr_text_core(frame, roi, self.MIN_CONF)
 
     def _ocr_lines(self, frame, roi):
-        """OCR 该 ROI → [(text, cx_norm, cy_norm), ...](文字框中心按客户区归一化)。"""
-        sub = self._crop(frame, roi)
-        if sub is None or sub.size == 0:
-            return []
-        try:
-            res, _ = _get_ocr()(sub)
-        except Exception as exc:
-            dev_log("Water OCR 失败", exc)
-            return []
-        H, W = frame.shape[:2]
-        ox, oy = roi[0] * W, roi[1] * H
-        out = []
-        for it in (res or []):
-            try:
-                box, txt, score = it[0], str(it[1]).strip(), float(it[2])
-            except (IndexError, ValueError, TypeError):
-                continue
-            if not txt or score < self.MIN_CONF:
-                continue
-            cx = (ox + sum(p[0] for p in box) / len(box)) / W
-            cy = (oy + sum(p[1] for p in box) / len(box)) / H
-            out.append((txt, cx, cy))
-        return out
+        """OCR 该 ROI → [(text, cx_norm, cy_norm), ...]。转发到 ocr_utils.ocr_lines。"""
+        return _ocr_lines_core(frame, roi, self.MIN_CONF)
 
     def find_text(self, frame, roi, keyword: str) -> tuple[float, float] | None:
-        """在 ROI 中 OCR 查找包含 keyword 的文字,返回归一化中心坐标。"""
-        for txt, cx, cy in self._ocr_lines(frame, roi):
-            if keyword in txt:
-                return (cx, cy)
-        return None
+        """在 ROI 中 OCR 查找包含 keyword 的文字,返回归一化中心坐标。转发到 ocr_utils.find_text。"""
+        return _find_text_core(frame, roi, keyword, self.MIN_CONF)
 
     # ---- 业务检测 ----
     def has_go_home(self, frame) -> bool:
@@ -271,25 +226,9 @@ class WaterRecognizer:
 
     def find_friend_in_list(self, frame, friend_name: str) -> tuple[float, float] | None:
         """在好友列表中 OCR 查找指定好友名。返回归一化坐标(cx, cy)或 None。"""
-        sub = self._crop(frame, self.ROI_FRIEND_LIST)
-        if sub is None or sub.size == 0:
-            return None
-        try:
-            res, _ = _get_ocr()(sub)
-        except Exception:
-            return None
-        H, W = frame.shape[:2]
-        ox, oy = self.ROI_FRIEND_LIST[0] * W, self.ROI_FRIEND_LIST[1] * H
-        for it in (res or []):
-            try:
-                box, txt, score = it[0], str(it[1]).strip(), float(it[2])
-            except (IndexError, ValueError, TypeError):
-                continue
-            if not txt or score < self.MIN_CONF:
-                continue
+        # 直接用公共 ocr_lines(已含坐标归一化 + 置信度过滤),免本地 box 解析
+        for txt, cx, cy in self._ocr_lines(frame, self.ROI_FRIEND_LIST):
             if friend_name in txt:
-                cx = (ox + sum(p[0] for p in box) / len(box)) / W
-                cy = (oy + sum(p[1] for p in box) / len(box)) / H
                 return (cx, cy)
         return None
 

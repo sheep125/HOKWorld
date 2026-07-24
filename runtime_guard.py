@@ -93,8 +93,23 @@ class TaskRegistry:
 registry = TaskRegistry()
 
 
+# 所有 bot 可能按下过的虚拟键码(WASD/移动、F/交互、ESC/退出、Enter/确认)。
+# release_known_keys 会把这些键全部试着抬起 —— 抬一个没按下的键无副作用,故宁多勿漏。
+# 新增功能用到新键时,只需在这里加一项,不用改 release_known_keys。
+# 历史教训:water/login_bot 最早用了 0x0D(Enter),但这里曾漏掉 → 回车可能卡住。
+ACTIVE_KEYS = (
+    0x41,   # A
+    0x44,   # D
+    0x57,   # W
+    0x53,   # S
+    0x46,   # F
+    0x1B,   # ESC
+    0x0D,   # Enter(login_bot 用)
+)
+
+
 def release_known_keys(log=dev_log) -> None:
-    for vk in (0x41, 0x44, 0x57, 0x53, 0x46, 0x1B):
+    for vk in ACTIVE_KEYS:
         try:
             win32api.keybd_event(vk, 0, win32con.KEYEVENTF_KEYUP, 0)
         except Exception as exc:

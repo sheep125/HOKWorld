@@ -32,7 +32,7 @@ if errorlevel 1 (
 
 REM -- 2. 打包前自检 --
 echo [2/4] 语法自检...
-call "%DEV_DIR%.venv\Scripts\python.exe" -c "import py_compile;[py_compile.compile(f, doraise=True) for f in ['app.py','config.py','scheduler.py','task_log.py','runtime_guard.py','paths.py','version.py','winenv.py','ui/realtime.py','ui/settings.py','ui/schedule_card.py','workers/water_worker.py','workers/launch_worker.py','workers/monthly_card_worker.py','water/self_farm.py','water/recognizer.py','monthly_card.py']]" 2^>^&1
+call "%DEV_DIR%.venv\Scripts\python.exe" -c "import py_compile;[py_compile.compile(f, doraise=True) for f in ['app.py','config.py','scheduler.py','task_log.py','runtime_guard.py','paths.py','version.py','winenv.py','capture.py','ocr_utils.py','launcher.py','monthly_card.py','ui/realtime.py','ui/settings.py','ui/schedule_card.py','workers/water_worker.py','workers/launch_worker.py','workers/monthly_card_worker.py','water/self_farm.py','water/recognizer.py','water/login_bot.py','fishing/matcher.py','fishing/fisher.py']]" 2^>^&1
 if errorlevel 1 (
     echo [错误] 自检失败,有语法错误,已中止打包
     pause

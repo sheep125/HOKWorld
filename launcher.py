@@ -28,14 +28,13 @@ import random
 import time
 import winreg
 
-import cv2
 import numpy as np
 import win32con
 import win32gui
 import win32ui
 
 from capture import GameCapture, NORM_W
-from fishing.matcher import _get_ocr
+from ocr_utils import crop as _crop, norm1920 as _norm1920, ocr_lines as _ocr_lines_core, ocr_text as _ocr_text_core
 from runtime_guard import dev_log, release_known_keys, safe_click_norm, safe_press_key
 
 GAME_TITLE_KEY = "王者荣耀世界"      # 启动器与游戏窗口标题都含它(可能带尾空格)
@@ -382,20 +381,11 @@ def launch_game_exe(path):
     ctypes.windll.shell32.ShellExecuteW(None, "open", path, None, os.path.dirname(path), 1)
 
 
-def _norm1920(frame):
-    """宽 > NORM_W 时按比例降采样到 NORM_W(ROI/点击都用归一化分数,缩放不影响坐标),省 OCR 时间。"""
-    h, w = frame.shape[:2]
-    if w <= NORM_W:
-        return frame
-    nh = max(1, int(round(h * NORM_W / w)))
-    return cv2.resize(frame, (NORM_W, nh), interpolation=cv2.INTER_AREA)
-
-
-def _crop(frame, roi):
-    """按归一化 roi=(x0,y0,x1,y1) 切子图。"""
-    h, w = frame.shape[:2]
-    x0, y0, x1, y1 = roi
-    return frame[int(y0 * h):int(y1 * h), int(x0 * w):int(x1 * w)]
+def _print_window_bgr(hwnd):
+    """后台截图(向后兼容包装):实际调用 capture.print_window_bgr。
+    迁移历史:原本实现在 launcher,现统一到 capture;保留此名避免外部调用方一次性大改。"""
+    from capture import print_window_bgr
+    return print_window_bgr(hwnd)
 
 
 class GameLauncher:
@@ -564,53 +554,29 @@ class GameLauncher:
     def _press_esc(self) -> None:
         safe_press_key(self.VK_ESC, self._stopped, self._foreground, self.log, 0.05)
 
+    def _bring_game_to_front(self) -> None:
+        """把游戏/启动器窗口拉到前台(关公告等关键操作前调用)。
+
+        为什么需要这个:后台点击(PostMessage)对公告层等非标准控件常无效,
+        硬件点击又被 `_foreground()` 守卫拦(游戏不在前台就不点)。
+        激活后前台=游戏 → 硬件点击路径可用 → 点 X / 按 ESC 才真能关掉公告。
+        用 winenv.activate_game_window 的 AttachThreadInput 技巧绕过 Windows 前台锁定。"""
+        try:
+            from winenv import activate_game_window
+            activate_game_window(self.log)
+        except Exception as exc:
+            dev_log("激活游戏窗口失败", exc)
+
     # ---- OCR 取词 ----
     def _ocr_join(self, f, roi) -> str:
-        sub = _crop(f, roi)
-        if sub is None or sub.size == 0:
-            return ""
-        try:
-            res, _ = _get_ocr()(sub)
-        except Exception as exc:
-            dev_log("启动器 OCR 失败", exc)
-            return ""
-        parts = []
-        for it in (res or []):
-            try:
-                if float(it[2]) >= self.MIN_CONF:
-                    parts.append(str(it[1]))
-            except (TypeError, ValueError, IndexError):
-                try:
-                    parts.append(str(it[1]))
-                except Exception:
-                    pass
-        return "".join(parts)
+        """OCR 该 ROI → 拼接文本(过滤低置信)。薄包装:转发到 ocr_utils.ocr_text。"""
+        return _ocr_text_core(f, roi, self.MIN_CONF)
 
     def _ocr_lines(self, f, roi):
         """OCR 该 ROI → [(text, cx_norm, cy_norm), ...](文字框中心按客户区归一化)。
-        用框中心做点击点 → 随启动器窗口大小/位置自适应,比录制定值稳。"""
-        sub = _crop(f, roi)
-        if sub is None or sub.size == 0:
-            return []
-        try:
-            res, _ = _get_ocr()(sub)
-        except Exception as exc:
-            dev_log("启动器 OCR 失败", exc)
-            return []
-        H, W = f.shape[:2]
-        ox, oy = roi[0] * W, roi[1] * H
-        out = []
-        for it in (res or []):
-            try:
-                box, txt, score = it[0], str(it[1]).strip(), float(it[2])
-            except (IndexError, ValueError, TypeError):
-                continue
-            if not txt or score < self.MIN_CONF:
-                continue
-            cx = (ox + sum(p[0] for p in box) / len(box)) / W
-            cy = (oy + sum(p[1] for p in box) / len(box)) / H
-            out.append((txt, cx, cy))
-        return out
+        用框中心做点击点 → 随启动器窗口大小/位置自适应,比录制定值稳。
+        薄包装:转发到 ocr_utils.ocr_lines。"""
+        return _ocr_lines_core(f, roi, self.MIN_CONF)
 
     def read_launch_button(self, f):
         """启动器右下角按钮 → (state, 点击点):ready(启动游戏)/ exiting / ingame / none。
@@ -807,11 +773,17 @@ class GameLauncher:
                         self._start_since = 0.0             # 公告出现 → 开始游戏稳定计时清零(刚才那是公告前的闪现)
                         self._announce_tries += 1
                         if self._announce_tries % 2 == 1:   # X 优先(实测点 X 能关掉;ESC 对本游戏公告常无效)
-                            self.log("检测到「公告」→ 点右上角 X 关闭")
+                            self.log("检测到「公告」→ 激活游戏窗口并点右上角 X 关闭")
+                            # 后台点击对公告 X 按钮常无效(公告层可能吃 DirectInput 或非标准消息处理)
+                            # → 先把游戏拉到前台,让硬件点击路径可用,再点 X
+                            self._bring_game_to_front()
+                            time.sleep(0.3)   # 等前台切换稳定
                             self._click(self.CLOSE_X_PT)
                         else:
-                            self.log("公告仍在 → 按 ESC 返回(后台按键)")
-                            self._press_esc_bg()
+                            self.log("公告仍在 → 激活窗口后按 ESC 返回")
+                            self._bring_game_to_front()
+                            time.sleep(0.2)
+                            self._press_esc()
                         time.sleep(0.8)
                         idle_count = 0
                         last = ""

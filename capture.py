@@ -167,3 +167,66 @@ class GameCapture:
         self._free()
         self._last = None
         self._canvas = None
+
+
+# ----------------------------- 后台截图(PrintWindow) -----------------------------
+# 从 launcher.py 迁移过来:它本就是"截图工具",放业务模块不合理;water/recognizer、
+# monthly_card 等都需要后台截图,统一从 capture.py 取,耦合方向才正。
+
+import ctypes as _ctypes
+import win32ui as _win32ui
+
+_PW_FLAG = 3  # PW_CLIENTONLY | PW_RENDERFULLCONTENT
+
+
+def print_window_bgr(hwnd) -> np.ndarray | None:
+    """后台截图:PrintWindow(PW_CLIENTONLY|PW_RENDERFULLCONTENT)取窗口**自身**客户区画面。
+    被遮挡/无焦点也能取到真实内容;失败返回 None。
+
+    原名 launcher._print_window_bgr(私有),迁到 capture 后改公开名 print_window_bgr。
+    launcher 保留同名私有包装以免外部调用方一次性大改。"""
+    dc = mfc = mem = bmp = None
+    try:
+        l, t, r, b = win32gui.GetClientRect(hwnd)
+        w, h = r - l, b - t
+        if w <= 0 or h <= 0:
+            return None
+        dc = win32gui.GetDC(hwnd)
+        mfc = _win32ui.CreateDCFromHandle(dc)
+        mem = mfc.CreateCompatibleDC()
+        bmp = _win32ui.CreateBitmap()
+        bmp.CreateCompatibleBitmap(mfc, w, h)
+        mem.SelectObject(bmp)
+        ok = _u32.PrintWindow(_ctypes.c_void_p(hwnd), _ctypes.c_void_p(mem.GetSafeHdc()), _PW_FLAG)
+        if not ok:
+            return None
+        bits = bmp.GetBitmapBits(True)
+        return np.ascontiguousarray(np.frombuffer(bits, np.uint8).reshape(h, w, 4)[:, :, :3])
+    except Exception as exc:
+        dev_log("PrintWindow 后台截图失败", exc)
+        return None
+    finally:
+        try:
+            if bmp is not None:
+                win32gui.DeleteObject(bmp.GetHandle())
+        except Exception:
+            pass
+        try:
+            if mem is not None:
+                mem.DeleteDC()
+        except Exception:
+            pass
+        try:
+            if mfc is not None:
+                mfc.DeleteDC()
+        except Exception:
+            pass
+        try:
+            if dc is not None:
+                win32gui.ReleaseDC(hwnd, dc)
+        except Exception:
+            pass
+
+
+# 模块级 user32 句柄(PrintWindow 用)。
+_u32 = _ctypes.windll.user32

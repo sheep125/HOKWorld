@@ -28,6 +28,7 @@ class RealtimeInterface(ScrollInterface):
         self._monthly = None       # 月卡检测线程
         self._paused = False
         self._aborting = False
+        self._water_restarting = False  # 月卡联动:浇水重启中(防重复触发)
         self._last_msg = ""
 
         root = self.vbox
@@ -172,11 +173,21 @@ class RealtimeInterface(ScrollInterface):
         self._water.sig_log.connect(self._append)
         self._water.sig_done.connect(self._on_water_done)
         self._water.start()
+        # 月卡检测：浇水期间并行常驻(弹窗一日一次,关了联动重启浇水)
+        self._start_monthly_if_needed()
 
     def _on_water_done(self) -> None:
         if self._water:
             self._water.wait(1500)
             self._water = None
+        # 月卡联动：弹窗关闭后需要重启浇水
+        if self._water_restarting:
+            self._water_restarting = False
+            self._append("[月卡联动] 重新开始浇水…")
+            import time
+            time.sleep(1.5)  # 给游戏一点恢复时间
+            self._begin_watering()
+            return
         if self._aborting:
             self._maybe_reset_ui()
             return
@@ -248,7 +259,13 @@ class RealtimeInterface(ScrollInterface):
             self._gather.sig_count.connect(lambda n: self._append(f"已采集 {n} 个材料"))
             self._gather.sig_done.connect(self._on_gather_done)
             self._gather.start()
-        # 月卡检测：配置开了就常驻并行
+        # 月卡检测：配置开了就常驻并行(浇水阶段已启动则跳过)
+        self._start_monthly_if_needed()
+
+    def _start_monthly_if_needed(self) -> None:
+        """按配置启动月卡检测 Worker(已运行时跳过,防重复)。"""
+        if self._monthly is not None:
+            return
         try:
             from config import cfg
             if bool(cfg.get("monthly_card_check")):
@@ -256,9 +273,22 @@ class RealtimeInterface(ScrollInterface):
                 self._monthly = MonthlyCardWorker()
                 self._monthly.sig_log.connect(self._append)
                 self._monthly.sig_done.connect(self._on_monthly_done)
+                # 月卡联动浇水:弹窗关闭后重启浇水
+                self._monthly.sig_popup_closed.connect(self._on_popup_closed_during_water)
                 self._monthly.start()
+                self._append("[月卡联动] 月卡检测已启动(与浇水/检测并行)")
         except Exception:
             pass
+
+    def _on_popup_closed_during_water(self) -> None:
+        """月卡弹窗被关闭时:如果浇水正在运行,停止浇水并标记重启。"""
+        if not self._water:
+            return
+        if self._water_restarting:
+            return  # 已在重启中,不重复触发
+        self._water_restarting = True
+        self._append("[月卡联动] 检测到月卡弹窗已关闭,中断当前浇水,稍后重启…")
+        self._water.stop()
 
     def _toggle_pause(self) -> None:
         if not (self._worker or self._launcher or self._water or self._monthly):
@@ -278,6 +308,7 @@ class RealtimeInterface(ScrollInterface):
         self._stop_workers_no_ui()
 
     def _stop_workers_no_ui(self) -> None:
+        self._water_restarting = False  # 手动停止时取消重启
         for w in (self._launcher, self._water, self._worker, self._gather, self._monthly):
             if w: w.stop()
 
@@ -300,6 +331,10 @@ class RealtimeInterface(ScrollInterface):
         if self._monthly:
             self._monthly.wait(1500)
             self._monthly = None
+        # 浇水还在运行时不要重置UI(月卡检测超时退出,浇水继续跑)
+        if self._water is not None:
+            self._append("[月卡联动] 月卡检测窗口结束,浇水继续运行中")
+            return
         self._maybe_reset_ui()
 
     def _maybe_reset_ui(self) -> None:

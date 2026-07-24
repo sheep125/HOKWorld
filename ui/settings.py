@@ -4,7 +4,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from qfluentwidgets import (
     FluentIcon as FIF, InfoBar, InfoBarPosition, LineEdit, PushSettingCard,
-    SettingCard, SpinBox, SwitchSettingCard, TitleLabel,
+    SettingCard, SwitchSettingCard, TitleLabel,
 )
 from qfluentwidgets import ComboBox
 
@@ -102,29 +102,20 @@ class SettingsInterface(ScrollInterface):
         self.minimize_card.checkedChanged.connect(lambda on: cfg.set("minimize_after_game_start", bool(on)))
         root.addWidget(self.minimize_card)
 
-        # 月卡检测
+        # 月卡检测(OCR 常驻模式,不依赖时间窗口)
         self.monthly_card = SwitchSettingCard(
             FIF.DATE_TIME, "月卡检测",
-            "每日指定时间前后检测并关闭月卡弹窗(防止卡住)")
+            "游戏启动后常驻并行检测,OCR识别月卡/奖励弹窗并点击关闭(不依赖ESC,一日仅触发一次)")
         self.monthly_card.setChecked(bool(cfg.get("monthly_card_check")))
         self.monthly_card.checkedChanged.connect(lambda on: cfg.set("monthly_card_check", bool(on)))
         root.addWidget(self.monthly_card)
 
-        self.monthly_hour_spin = SpinBox()
-        self.monthly_hour_spin.setRange(0, 23)
-        self.monthly_hour_spin.setValue(int(cfg.get("monthly_card_hour")))
-        self.monthly_hour_spin.setFixedWidth(100)
-        self.monthly_hour_spin.valueChanged.connect(lambda v: cfg.set("monthly_card_hour", v))
-        self.monthly_window_spin = SpinBox()
-        self.monthly_window_spin.setRange(5, 120)
-        self.monthly_window_spin.setValue(int(cfg.get("monthly_card_window_mins")))
-        self.monthly_window_spin.setFixedWidth(100)
-        self.monthly_window_spin.valueChanged.connect(lambda v: cfg.set("monthly_card_window_mins", v))
-        from qfluentwidgets import ExpandGroupSettingCard
-        self.monthly_group = ExpandGroupSettingCard(FIF.DATE_TIME, "月卡检测设置", "月卡弹窗出现时间和检测窗口", self)
-        self.monthly_group.addGroup(FIF.HISTORY, "弹窗小时(0-23)", "月卡大概几点弹出(默认0=凌晨0点)", self.monthly_hour_spin)
-        self.monthly_group.addGroup(FIF.SYNC, "检测窗口(分钟)", "在该时间前后多少分钟内检测", self.monthly_window_spin)
-        root.addWidget(self.monthly_group)
+        # 游戏启动器路径(留空=自动定位;手动选择更稳)
+        self.game_path_card = PushSettingCard(
+            "选择…", FIF.GAME, "游戏启动器路径",
+            self._game_path_display())
+        self.game_path_card.clicked.connect(self._pick_game_exe)
+        root.addWidget(self.game_path_card)
 
         # 时序抖动 —— 开关
         from config import cfg
@@ -184,6 +175,45 @@ class SettingsInterface(ScrollInterface):
                  if ln.strip() and not ln.strip().startswith("#")])
         InfoBar.success("已保存", f"{label}已写入({n} 条),下次「开始」采集时生效。",
                         duration=3000, position=InfoBarPosition.TOP, parent=self)
+
+    # ---- 游戏启动器路径 ----
+    def _game_path_display(self) -> str:
+        """返回设置卡片上显示的当前路径文案。"""
+        from config import cfg
+        p = cfg.get("game_path")
+        if p:
+            # 路径可能很长 → 只显示文件名 + 父目录
+            import os
+            name = os.path.basename(p)
+            parent = os.path.basename(os.path.dirname(p))
+            return f"当前: {parent}\\{name}  (留空=自动定位)"
+        return "留空=自动定位(注册表/开始菜单);点击「选择」手动指定启动器 exe"
+
+    def _pick_game_exe(self) -> None:
+        """弹文件选择对话框,让用户选 王者荣耀世界.exe 启动器。"""
+        from PySide6.QtWidgets import QFileDialog
+        from config import cfg
+
+        # 默认打开当前路径的父目录(或 C:\Game)
+        cur = cfg.get("game_path") or ""
+        start_dir = ""
+        if cur:
+            import os
+            start_dir = os.path.dirname(cur)
+        if not start_dir or not os.path.isdir(start_dir):
+            start_dir = r"C:\Game"
+
+        path, _ = QFileDialog.getOpenFileName(
+            self, "选择《王者荣耀世界》启动器", start_dir,
+            "可执行文件 (*.exe);;所有文件 (*.*)")
+        if not path:
+            return
+
+        cfg.set("game_path", path)
+        # 更新卡片显示
+        self.game_path_card.setContent(self._game_path_display())
+        InfoBar.success("已保存", f"启动器路径已设置:{path}", duration=3000,
+                        position=InfoBarPosition.TOP, parent=self)
 
     def _relaunch_admin(self) -> None:
         try:

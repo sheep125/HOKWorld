@@ -25,8 +25,15 @@ class LoginBot:
         self.paused = False
         self._rec = WaterRecognizer(log=log)
 
-    def stop(self): self.stop_flag = True
-    def set_paused(self, on): self.paused = on
+    def stop(self):
+        self.stop_flag = True
+        if hasattr(self, '_monthly_handler') and self._monthly_handler:
+            self._monthly_handler.stop()
+
+    def set_paused(self, on):
+        self.paused = on
+        if hasattr(self, '_monthly_handler') and self._monthly_handler:
+            self._monthly_handler.set_paused(on)
 
     def run(self) -> bool:
         self.stop_flag = False
@@ -71,42 +78,14 @@ class LoginBot:
         return True
 
     def _handle_monthly_card(self):
-        """检测并关闭月卡弹窗(可能不是即时出现,需要等一段时间)。"""
-        import datetime
-        now = datetime.datetime.now()
-        target = now.replace(hour=self.monthly_hour, minute=0, second=0, microsecond=0)
-        window_min = self.monthly_window_mins
-
-        # 检查当前时间是否在月卡窗口内
-        delta = abs((now - target).total_seconds()) / 60
-        if delta > window_min:
-            self.log(f"[月卡] 当前不在月卡检测窗口(当前{now.hour}:{now.minute:02d}, 目标{self.monthly_hour}:00±{window_min}分)")
-            return
-
-        self.log(f"[月卡] 进入月卡检测窗口,等待月卡弹窗…")
-        deadline = time.time() + window_min * 60
-        while not self.stop_flag and time.time() < deadline:
-            if self.paused:
-                time.sleep(0.5)
-                continue
-            frame = self._rec._grab()
-            if frame is None:
-                time.sleep(2)
-                continue
-            fn = self._rec._norm1920(frame)
-            # 检测月卡弹窗特征: "月卡" "领取" "已续费" 等
-            txt = self._rec._ocr_text(fn, (0.3, 0.3, 0.7, 0.7))
-            if "月卡" in txt and any(k in txt for k in ("领取", "已续费", "续费", "关闭")):
-                self.log("[月卡] 检测到月卡弹窗,按 ESC 关闭")
-                self._press_esc()
-                time.sleep(1)
-                return
-            if "月卡" in txt:
-                self.log("[月卡] 检测到月卡,但无关闭按钮,按 ESC 尝试")
-                self._press_esc()
-                time.sleep(1)
-                return
-            time.sleep(5)
+        """检测并关闭月卡弹窗(使用 OCR 定位+点击,不再依赖 ESC)。"""
+        from monthly_card import MonthlyCardHandler
+        handler = MonthlyCardHandler(log=self.log)
+        # 传递 stop/pause 状态到 handler
+        self._monthly_handler = handler
+        # 运行月卡检测(handler 内部有独立的循环和超时)
+        handler.run()
+        self._monthly_handler = None
 
     def _press_esc(self):
         safe_press_key(0x1B, self._stopped, self._foreground, None, 0.05)

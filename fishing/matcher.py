@@ -19,6 +19,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from runtime_guard import dev_log
 from .template_bank import (
     DEFAULT_SCALES, FAST_SCALES, TemplateBank, crop as _crop, match_scales,
     normalize, pp_gray,
@@ -193,7 +194,8 @@ class FishingRecognizer:
         sub = frame[int(0.45 * h):int(0.75 * h), 0:int(0.32 * w)]
         try:
             res, _ = _get_ocr()(sub)
-        except Exception:
+        except Exception as exc:
+            dev_log("is_success OCR 失败", exc)
             return False
         if not res:
             return False
@@ -211,7 +213,8 @@ class FishingRecognizer:
             return ""
         try:
             res, _ = _get_ocr()(sub)
-        except Exception:
+        except Exception as exc:
+            dev_log("_ocr_text OCR 失败", exc)
             return ""
         if not res:
             return ""
